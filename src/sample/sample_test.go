@@ -7,49 +7,11 @@ import (
 
 	"testing"
 
-	"appengine"
-	"appengine/user"
 	"appengine/aetest"
 	"appengine/datastore"
 
 	"github.com/GoogleCloudPlatform/go-endpoints/endpoints"
 )
-
-type unitTestContext struct {
-	appengine.Context
-}
-
-func (c *unitTestContext) HTTPRequest() *http.Request {
-	return c.Request().(*http.Request)
-}
-
-func (c *unitTestContext) Namespace(name string) (endpoints.Context, error) {
-	nc, err := appengine.Namespace(c, name)
-	if err != nil {
-		return nil, err
-	}
-	return &unitTestContext{nc}, nil
-}
-
-func (c *unitTestContext) CurrentOAuthClientID(scope string) (string, error) {
-	return "", nil
-}
-
-func (c *unitTestContext) SetContext(context appengine.Context) {
-	c.Context = context
-}
-
-func (c *unitTestContext) CurrentOAuthUser(scope string) (*user.User, error) {
-	return nil, nil
-}
-
-func stubContextFactory(r *http.Request) endpoints.Context {
-	t := &unitTestContext{}
-	t.Context = testContext
-	return t
-}
-
-var testContext appengine.Context
 
 func TestSimpleDatastoreOpe(t *testing.T) {
 	opt := aetest.Options{AppID:"unittest", StronglyConsistentDatastore: true}
