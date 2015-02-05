@@ -17,6 +17,7 @@ import (
 
 type BlobContent struct {
 	Id          string    `json: "id" datastore:"_"`
+	Filename    string    `json: "filename"`
 	AbsFilename string    `json: "absFilename"`
 	ContentType string    `json: "contentType"`
 	Size        int64     `json: "size"`
@@ -75,6 +76,7 @@ func uploadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 
 	b := &BlobContent{
 		uuid.New(),
+		fh.Filename,
 		absFilename,
 		fh.Header.Get("Content-Type"),
 		size,
@@ -100,6 +102,7 @@ func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 		c.Errorf("%s", err.Error())
 	}
 
+	// JSTの日ごとにPathを区切っておく
 	filename := "/gs/" + bn + "/" + r.FormValue("name")
 	log.Printf("filename : " + filename)
 	fr, err := file.Open(c, filename)
@@ -123,7 +126,7 @@ func directStore(c appengine.Context, f multipart.File, fh *multipart.FileHeader
 		BucketName: bn,
 	}
 
-	wc, absFilename, err := file.Create(c, fh.Filename, opts)
+	wc, absFilename, err := file.Create(c, getNowDateJst(time.Now())+"/"+uuid.New(), opts)
 	if err != nil {
 		return "", 0, err
 	}
@@ -135,6 +138,11 @@ func directStore(c appengine.Context, f multipart.File, fh *multipart.FileHeader
 	}
 
 	return absFilename, size, nil
+}
+
+func getNowDateJst(t time.Time) string {
+	j := t.In(time.FixedZone("Asia/Tokyo", 9*60*60))
+	return j.Format("20060102")
 }
 
 func CreateBlobContentKey(c appengine.Context, id string) *datastore.Key {
