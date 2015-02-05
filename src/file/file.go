@@ -2,13 +2,26 @@ package file
 
 import (
 	"appengine"
+	"appengine/datastore"
 	"appengine/file"
-	"fmt"
+
+	"encoding/json"
 	"io"
 	"log"
 	"mime/multipart"
 	"net/http"
+	"time"
+
+	"code.google.com/p/go-uuid/uuid"
 )
+
+type BlobContent struct {
+	Id          string    `json: "id" datastore:"_"`
+	AbsFilename string    `json: "absFilename"`
+	ContentType string    `json: "contentType"`
+	Size        int64     `json: "size"`
+	CreatedAt   time.Time `json: "createdAt"`
+}
 
 func init() {
 	http.HandleFunc("/file", handler)
@@ -31,15 +44,17 @@ func uploadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 	err := r.ParseMultipartForm(10 * 1024 * 1024) // 10MB
 	if err != nil {
 		if err.Error() == "permission denied" {
-			fmt.Fprint(w, "Upload the file is too large.\n")
+			http.Error(w, "Upload the file is too large.\n", http.StatusBadRequest)
+			return
 		} else {
-			c.Errorf("%s", err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		return
 	}
 	f, fh, err := r.FormFile("filename")
 	if err != nil {
 		c.Errorf("%s", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer f.Close()
@@ -51,14 +66,32 @@ func uploadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 	absFilename, size, err := directStore(c, f, fh)
 	if err != nil {
 		c.Errorf("%s", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	log.Printf("absFilename : %s", absFilename)
 	log.Printf("size : %d", size)
 
+	b := &BlobContent{
+		uuid.New(),
+		absFilename,
+		fh.Header.Get("Content-Type"),
+		size,
+		time.Now(),
+	}
+	_, err = b.Save(c)
+	if err != nil {
+		c.Errorf("%s", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(absFilename))
+	err = json.NewEncoder(w).Encode(b)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
 
 func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
@@ -102,4 +135,24 @@ func directStore(c appengine.Context, f multipart.File, fh *multipart.FileHeader
 	}
 
 	return absFilename, size, nil
+}
+
+func CreateBlobContentKey(c appengine.Context, id string) *datastore.Key {
+	log.Printf("key name = %s : ", id)
+	return datastore.NewKey(c, "BlobContent", id, 0, nil)
+}
+
+func (b *BlobContent) Key(c appengine.Context) *datastore.Key {
+	return CreateBlobContentKey(c, b.Id)
+}
+
+func (b *BlobContent) Save(c appengine.Context) (*BlobContent, error) {
+	b.CreatedAt = time.Now()
+	k, err := datastore.Put(c, b.Key(c), b)
+	if err != nil {
+		return nil, err
+	}
+
+	b.Id = k.StringID()
+	return b, nil
 }
