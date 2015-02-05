@@ -5,8 +5,8 @@ import (
 	"appengine/file"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
+	"mime/multipart"
 	"net/http"
 )
 
@@ -31,32 +31,31 @@ func uploadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 	err := r.ParseMultipartForm(10 * 1024 * 1024) // 10MB
 	if err != nil {
 		if err.Error() == "permission denied" {
-			fmt.Fprint(w, "アップロード可能な容量を超えています。\n")
+			fmt.Fprint(w, "Upload the file is too large.\n")
 		} else {
 			c.Errorf("%s", err.Error())
 		}
 		return
 	}
-	file, fileHeader, err := r.FormFile("filename")
+	f, fh, err := r.FormFile("filename")
 	if err != nil {
 		c.Errorf("%s", err.Error())
 		return
 	}
-	defer file.Close()
+	defer f.Close()
 
-	data, err := ioutil.ReadAll(file)
-	if err != nil {
-		c.Errorf("%s", err.Error())
-		return
-	}
+	log.Printf("%s", fh.Filename)
+	log.Printf("%v", fh.Header)
+	log.Printf("Content-Type : %s", fh.Header.Get("Content-Type"))
 
-	absFilename, err := directStore(c, data, fileHeader.Filename)
+	absFilename, size, err := directStore(c, f, fh)
 	if err != nil {
 		c.Errorf("%s", err.Error())
 		return
 	}
 
-	log.Printf("%s", absFilename)
+	log.Printf("absFilename : %s", absFilename)
+	log.Printf("size : %d", size)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte(absFilename))
@@ -80,27 +79,27 @@ func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, fr)
 }
 
-func directStore(c appengine.Context, data []byte, filename string) (absFilename string, err error) {
+func directStore(c appengine.Context, f multipart.File, fh *multipart.FileHeader) (absFilename string, size int64, err error) {
 	bn, err := file.DefaultBucketName(c)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
 	opts := &file.CreateOptions{
-		MIMEType:   "image/png",
+		MIMEType:   fh.Header.Get("Content-Type"),
 		BucketName: bn,
 	}
 
-	wc, absFilename, err := file.Create(c, filename, opts)
+	wc, absFilename, err := file.Create(c, fh.Filename, opts)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer wc.Close()
 
-	_, err = wc.Write(data)
+	size, err = io.Copy(wc, f)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 
-	return absFilename, nil
+	return absFilename, size, nil
 }
