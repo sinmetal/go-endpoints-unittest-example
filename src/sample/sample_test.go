@@ -14,7 +14,7 @@ import (
 )
 
 func TestSimpleDatastoreOpe(t *testing.T) {
-	opt := aetest.Options{AppID:"unittest", StronglyConsistentDatastore: true}
+	opt := aetest.Options{AppID: "unittest", StronglyConsistentDatastore: true}
 	c, err := aetest.NewContext(&opt)
 	if err != nil {
 		t.Fatal(err.Error())
@@ -65,7 +65,7 @@ func TestSimpleDatastoreOpe(t *testing.T) {
 }
 
 func TestList(t *testing.T) {
-	opt := aetest.Options{AppID:"unittest", StronglyConsistentDatastore: true}
+	opt := aetest.Options{AppID: "unittest", StronglyConsistentDatastore: true}
 	c, err := aetest.NewContext(&opt)
 	if err != nil {
 		t.Fatal(err.Error())
