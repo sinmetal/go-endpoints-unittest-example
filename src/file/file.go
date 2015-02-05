@@ -4,9 +4,10 @@ import (
 	"appengine"
 	"appengine/file"
 	"fmt"
+	"io"
 	"io/ioutil"
-	"net/http"
 	"log"
+	"net/http"
 )
 
 func init() {
@@ -21,6 +22,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unsupported method.", http.StatusMethodNotAllowed)
 	case "POST":
 		uploadFile(c, w, r)
+	case "GET":
+		downloadFile(c, w, r)
 	}
 }
 
@@ -54,6 +57,27 @@ func uploadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("%s", absFilename)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(absFilename))
+}
+
+func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
+	bn, err := file.DefaultBucketName(c)
+	if err != nil {
+		c.Errorf("%s", err.Error())
+	}
+
+	filename := "/gs/" + bn + "/" + r.FormValue("name")
+	log.Printf("filename : " + filename)
+	fr, err := file.Open(c, filename)
+	if err != nil {
+		c.Errorf("%s", err.Error())
+	}
+	defer fr.Close()
+
+	w.Header().Set("Cache-Control:public", "max-age=120")
+	io.Copy(w, fr)
 }
 
 func directStore(c appengine.Context, data []byte, filename string) (absFilename string, err error) {
