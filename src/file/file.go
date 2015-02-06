@@ -93,25 +93,32 @@ func uploadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 	err = json.NewEncoder(w).Encode(b)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
 
 func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
-	bn, err := file.DefaultBucketName(c)
+	id := r.FormValue("id")
+	k := CreateBlobContentKey(c, id)
+
+	var b BlobContent
+	err := datastore.Get(c, k, &b)
 	if err != nil {
 		c.Errorf("%s", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
-	// JSTの日ごとにPathを区切っておく
-	filename := "/gs/" + bn + "/" + r.FormValue("name")
-	log.Printf("filename : " + filename)
-	fr, err := file.Open(c, filename)
+	fr, err := file.Open(c, b.AbsFilename)
 	if err != nil {
 		c.Errorf("%s", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	defer fr.Close()
 
 	w.Header().Set("Cache-Control:public", "max-age=120")
+	w.Header().Set("Content-Type", b.ContentType)
 	io.Copy(w, fr)
 }
 
@@ -126,6 +133,7 @@ func directStore(c appengine.Context, f multipart.File, fh *multipart.FileHeader
 		BucketName: bn,
 	}
 
+	// JSTで、日ごとにPathを区切っておく
 	wc, absFilename, err := file.Create(c, getNowDateJst(time.Now())+"/"+uuid.New(), opts)
 	if err != nil {
 		return "", 0, err
