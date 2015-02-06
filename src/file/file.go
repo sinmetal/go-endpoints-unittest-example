@@ -112,11 +112,11 @@ func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 
 	ims := r.Header.Get("If-Modified-Since")
 	if ims != "" {
-		imsTime, err := time.Parse(time.RFC1123, ims)
+		imsTime, err := parseTime(ims)
 		if err != nil {
 			c.Errorf("If-Modified-Since Parse Error : %v \n %s", ims, err.Error())
 		} else {
-			if b.CreatedAt.After(imsTime) {
+			if b.CreatedAt.Equal(imsTime) || b.CreatedAt.After(imsTime) {
 				w.Header().Set("Last-Modified", b.CreatedAt.String())
 				w.WriteHeader(http.StatusNotModified)
 				return
@@ -168,6 +168,26 @@ func directStore(c appengine.Context, f multipart.File, fh *multipart.FileHeader
 func getNowDateJst(t time.Time) string {
 	j := t.In(time.FixedZone("Asia/Tokyo", 9*60*60))
 	return j.Format("20060102")
+}
+
+const timeFormat = "2006-01-02 15:04:05.99999 -0700 MST"
+
+var timeFormats = []string{
+	time.RFC1123,
+	time.RFC1123Z,
+	timeFormat,
+	time.RFC850,
+	time.ANSIC,
+}
+
+func parseTime(text string) (t time.Time, err error) {
+	for _, layout := range timeFormats {
+		t, err = time.Parse(layout, text)
+		if err == nil {
+			return
+		}
+	}
+	return
 }
 
 func CreateBlobContentKey(c appengine.Context, id string) *datastore.Key {
