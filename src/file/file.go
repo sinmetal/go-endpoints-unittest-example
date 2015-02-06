@@ -10,6 +10,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"time"
 
 	"code.google.com/p/go-uuid/uuid"
@@ -17,10 +18,10 @@ import (
 
 type BlobContent struct {
 	Id          string    `json: "id" datastore:"_"`
-	Filename    string    `json: "filename"`
-	AbsFilename string    `json: "absFilename"`
-	ContentType string    `json: "contentType"`
-	Size        int64     `json: "size"`
+	Filename    string    `json: "filename" datastore:"noindex"`
+	AbsFilename string    `json: "absFilename" datastore:"noindex"`
+	ContentType string    `json: "contentType" datastore:"noindex"`
+	Size        int64     `json: "size" datastore:"noindex"`
 	CreatedAt   time.Time `json: "createdAt"`
 }
 
@@ -93,25 +94,48 @@ func uploadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 	err = json.NewEncoder(w).Encode(b)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 }
 
 func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
-	bn, err := file.DefaultBucketName(c)
+	id := r.FormValue("id")
+	k := CreateBlobContentKey(c, id)
+
+	var b BlobContent
+	err := datastore.Get(c, k, &b)
 	if err != nil {
 		c.Errorf("%s", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
-	// JSTの日ごとにPathを区切っておく
-	filename := "/gs/" + bn + "/" + r.FormValue("name")
-	log.Printf("filename : " + filename)
-	fr, err := file.Open(c, filename)
+	ims := r.Header.Get("If-Modified-Since")
+	if ims != "" {
+		imsTime, err := parseTime(ims)
+		if err != nil {
+			c.Errorf("If-Modified-Since Parse Error : %v \n %s", ims, err.Error())
+		} else {
+			if b.CreatedAt.Equal(imsTime) || b.CreatedAt.After(imsTime) {
+				w.Header().Set("Last-Modified", b.CreatedAt.String())
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+	}
+
+	fr, err := file.Open(c, b.AbsFilename)
 	if err != nil {
 		c.Errorf("%s", err.Error())
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 	defer fr.Close()
 
 	w.Header().Set("Cache-Control:public", "max-age=120")
+	w.Header().Set("Content-Type", b.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(b.Size, 10))
+	w.Header().Set("Last-Modified", b.CreatedAt.String())
 	io.Copy(w, fr)
 }
 
@@ -126,6 +150,7 @@ func directStore(c appengine.Context, f multipart.File, fh *multipart.FileHeader
 		BucketName: bn,
 	}
 
+	// JSTで、日ごとにPathを区切っておく
 	wc, absFilename, err := file.Create(c, getNowDateJst(time.Now())+"/"+uuid.New(), opts)
 	if err != nil {
 		return "", 0, err
@@ -143,6 +168,26 @@ func directStore(c appengine.Context, f multipart.File, fh *multipart.FileHeader
 func getNowDateJst(t time.Time) string {
 	j := t.In(time.FixedZone("Asia/Tokyo", 9*60*60))
 	return j.Format("20060102")
+}
+
+const timeFormat = "2006-01-02 15:04:05.99999 -0700 MST"
+
+var timeFormats = []string{
+	time.RFC1123,
+	time.RFC1123Z,
+	timeFormat,
+	time.RFC850,
+	time.ANSIC,
+}
+
+func parseTime(text string) (t time.Time, err error) {
+	for _, layout := range timeFormats {
+		t, err = time.Parse(layout, text)
+		if err == nil {
+			return
+		}
+	}
+	return
 }
 
 func CreateBlobContentKey(c appengine.Context, id string) *datastore.Key {
