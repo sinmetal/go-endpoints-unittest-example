@@ -1,5 +1,5 @@
-application: my-app-id
-version: v1
+application: endpoint-sample-sinmetal
+version: 20150206d
 threadsafe: true
 
 runtime: go
