@@ -10,6 +10,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"strconv"
 	"time"
 
 	"code.google.com/p/go-uuid/uuid"
@@ -17,10 +18,10 @@ import (
 
 type BlobContent struct {
 	Id          string    `json: "id" datastore:"_"`
-	Filename    string    `json: "filename"`
-	AbsFilename string    `json: "absFilename"`
-	ContentType string    `json: "contentType"`
-	Size        int64     `json: "size"`
+	Filename    string    `json: "filename" datastore:"noindex"`
+	AbsFilename string    `json: "absFilename" datastore:"noindex"`
+	ContentType string    `json: "contentType" datastore:"noindex"`
+	Size        int64     `json: "size" datastore:"noindex"`
 	CreatedAt   time.Time `json: "createdAt"`
 }
 
@@ -109,6 +110,20 @@ func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ims := r.Header.Get("If-Modified-Since")
+	if ims != "" {
+		imsTime, err := time.Parse(time.RFC1123, ims)
+		if err != nil {
+			c.Errorf("If-Modified-Since Parse Error : %v \n %s", ims, err.Error())
+		} else {
+			if b.CreatedAt.After(imsTime) {
+				w.Header().Set("Last-Modified", b.CreatedAt.String())
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		}
+	}
+
 	fr, err := file.Open(c, b.AbsFilename)
 	if err != nil {
 		c.Errorf("%s", err.Error())
@@ -119,6 +134,8 @@ func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Cache-Control:public", "max-age=120")
 	w.Header().Set("Content-Type", b.ContentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(b.Size, 10))
+	w.Header().Set("Last-Modified", b.CreatedAt.String())
 	io.Copy(w, fr)
 }
 
