@@ -3,8 +3,14 @@ package sample
 import (
 	"appengine/datastore"
 	"github.com/GoogleCloudPlatform/go-endpoints/endpoints"
+	sessions "github.com/hnakamur/gaesessions"
 	"time"
+	"net/http"
 )
+
+const sessionName = "testcookie"
+
+var memcacheDatastoreStore = sessions.NewMemcacheDatastoreStore("", "", sessions.DefaultNonPersistentSessionDuration, []byte("hogehogefugafuga"))
 
 // Greeting is a datastore entity that represents a single greeting.
 // It also serves as (a part of) a response of GreetingService.
@@ -31,6 +37,8 @@ type GreetingService struct {
 }
 
 func init() {
+	http.HandleFunc("/cookie", saveCookie)
+
 	greetService := &GreetingService{}
 	api, err := endpoints.RegisterService(greetService,
 		"greeting", "v1", "Greetings API", true)
@@ -63,4 +71,14 @@ func (gs *GreetingService) List(c endpoints.Context, r *GreetingsListReq) (*Gree
 		greets[i].Key = k
 	}
 	return &GreetingsList{greets}, nil
+}
+
+func saveCookie(w http.ResponseWriter, r *http.Request) {
+	session, err := memcacheDatastoreStore.Get(r, sessionName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	session.Values["id"] = "testcookievalue"
+	memcacheDatastoreStore.Save(r, w, session)
 }
