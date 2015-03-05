@@ -3,8 +3,9 @@ package file
 import (
 	"appengine"
 	"appengine/datastore"
-	"appengine/file"
+	af "appengine/file"
 
+	"file"
 	"encoding/json"
 	"io"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+	"fmt"
 
 	"code.google.com/p/go-uuid/uuid"
 )
@@ -27,6 +29,7 @@ type BlobContent struct {
 
 func init() {
 	http.HandleFunc("/file", handler)
+	http.HandleFunc("/fileMulti", handlerMulti)
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +42,17 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		uploadFile(c, w, r)
 	case "GET":
 		downloadFile(c, w, r)
+	}
+}
+
+func handlerMulti(w http.ResponseWriter, r *http.Request) {
+	c := appengine.NewContext(r)
+
+	switch r.Method {
+	default:
+		http.Error(w, "unsupported method.", http.StatusMethodNotAllowed)
+	case "POST":
+		uploadFileMulti(c, w, r)
 	}
 }
 
@@ -98,6 +112,40 @@ func uploadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func uploadFileMulti(c appengine.Context, w http.ResponseWriter, r *http.Request) {
+	err := r.ParseMultipartForm(10 * 1024 * 1024) // grab the multipart form
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	formdata := r.MultipartForm  // ok, no problem so far, read the Form data
+
+	//get the *fileheaders
+	files := formdata.File["multiplefiles"]  // grab the filenames
+
+	for i, _ := range files {  // loop through the files one by one
+		file, err := files[i].Open()
+		defer file.Close()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		absFilename, size, err := directStore(c, file, files[i])
+		if err != nil {
+			c.Errorf("%s", err.Error())
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+
+		fmt.Fprintf(w,"%s, size = %d", absFilename, size)
+	}
+
+	w.WriteHeader(http.StatusOK)
+}
+
 func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 	id := r.FormValue("id")
 	k := CreateBlobContentKey(c, id)
@@ -124,7 +172,7 @@ func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	fr, err := file.Open(c, b.AbsFilename)
+	fr, err := af.Open(c, b.AbsFilename)
 	if err != nil {
 		c.Errorf("%s", err.Error())
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -140,18 +188,18 @@ func downloadFile(c appengine.Context, w http.ResponseWriter, r *http.Request) {
 }
 
 func directStore(c appengine.Context, f multipart.File, fh *multipart.FileHeader) (absFilename string, size int64, err error) {
-	bn, err := file.DefaultBucketName(c)
+	bn, err := af.DefaultBucketName(c)
 	if err != nil {
 		return "", 0, err
 	}
 
-	opts := &file.CreateOptions{
+	opts := &af.CreateOptions{
 		MIMEType:   fh.Header.Get("Content-Type"),
 		BucketName: bn,
 	}
 
 	// JSTで、日ごとにPathを区切っておく
-	wc, absFilename, err := file.Create(c, getNowDateJst(time.Now())+"/"+uuid.New(), opts)
+	wc, absFilename, err := af.Create(c, getNowDateJst(time.Now())+"/"+uuid.New(), opts)
 	if err != nil {
 		return "", 0, err
 	}
